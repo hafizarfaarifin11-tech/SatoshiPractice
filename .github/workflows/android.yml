@@ -12,11 +12,29 @@ permissions:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build APK from project ZIP
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Find project ZIP
+        id: project_zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_NAME="SatoshiPractice_Android_Project.zip"
+          ZIP_PATH="$(find "$GITHUB_WORKSPACE" -type f -name "$ZIP_NAME" -not -path '*/.git/*' -print -quit)"
+
+          if [[ -z "$ZIP_PATH" ]]; then
+            echo "::error::File $ZIP_NAME tidak ditemukan. Letakkan ZIP tersebut di repository (disarankan di root repository)."
+            echo "File ZIP yang ditemukan:"
+            find "$GITHUB_WORKSPACE" -type f -iname '*.zip' -not -path '*/.git/*' -print || true
+            exit 1
+          fi
+
+          echo "ZIP ditemukan: $ZIP_PATH"
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -27,30 +45,65 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: ''
           accept-android-sdk-licenses: 'true'
           log-accepted-android-sdk-licenses: 'false'
 
       - name: Install required Android SDK packages
+        shell: bash
         run: |
+          set -euo pipefail
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
-          sdkmanager --list_installed
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Build APK
-        run: gradle --no-daemon -p android_project clean assembleDebug
+      - name: Extract Android project ZIP
+        id: extract
+        shell: bash
+        env:
+          ZIP_PATH: ${{ steps.project_zip.outputs.zip_path }}
+        run: |
+          set -euo pipefail
+          EXTRACT_DIR="$RUNNER_TEMP/SatoshiPractice_Android_Project"
+          mkdir -p "$EXTRACT_DIR"
+          unzip -q "$ZIP_PATH" -d "$EXTRACT_DIR"
+
+          SETTINGS_FILE="$(find "$EXTRACT_DIR" -maxdepth 5 -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit || true)"
+          if [[ -z "$SETTINGS_FILE" ]]; then
+            echo "::error::ZIP berhasil diekstrak, tetapi settings.gradle tidak ditemukan."
+            echo "Isi ZIP:"
+            find "$EXTRACT_DIR" -maxdepth 5 -type f | sort | head -100
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+          if [[ ! -f "$PROJECT_DIR/app/build.gradle" && ! -f "$PROJECT_DIR/app/build.gradle.kts" ]]; then
+            echo "::error::Folder project '$PROJECT_DIR' tidak memiliki app/build.gradle."
+            exit 1
+          fi
+
+          APK_PATH="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          echo "Project directory: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Build debug APK
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ steps.extract.outputs.project_dir }}
+        run: |
+          set -euo pipefail
+          gradle --no-daemon -p "$PROJECT_DIR" clean assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SatoshiPractice-debug-apk
-          path: android_project/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.extract.outputs.apk_path }}
           if-no-files-found: error
           
