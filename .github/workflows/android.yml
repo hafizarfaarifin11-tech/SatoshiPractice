@@ -24,10 +24,19 @@ jobs:
         run: |
           set -euo pipefail
           ZIP_NAME="SatoshiPractice_Android_Project.zip"
-          ZIP_PATH="$(find "$GITHUB_WORKSPACE" -type f -name "$ZIP_NAME" -not -path '*/.git/*' -print -quit)"
+
+          # Cari secara rekursif dan abaikan perbedaan huruf besar/kecil.
+          # Ini juga menerima nama lama seperti SatoshiPractice_android_project.zip.
+          ZIP_PATH="$(find "$GITHUB_WORKSPACE" -type f -iname "$ZIP_NAME" -not -path '*/.git/*' -print -quit)"
+
+          # Jika nama standar tidak ditemukan, coba ZIP SatoshiPractice lain
+          # sebagai fallback agar arsip lama/berversi tetap bisa dipakai.
+          if [[ -z "$ZIP_PATH" ]]; then
+            ZIP_PATH="$(find "$GITHUB_WORKSPACE" -type f -iname 'SatoshiPractice*project*.zip' -not -path '*/.git/*' -print -quit)"
+          fi
 
           if [[ -z "$ZIP_PATH" ]]; then
-            echo "::error::File $ZIP_NAME tidak ditemukan. Letakkan ZIP tersebut di repository (disarankan di root repository)."
+            echo "::error::ZIP proyek SatoshiPractice tidak ditemukan. Upload SatoshiPractice_Android_Project.zip ke repository."
             echo "File ZIP yang ditemukan:"
             find "$GITHUB_WORKSPACE" -type f -iname '*.zip' -not -path '*/.git/*' -print || true
             exit 1
